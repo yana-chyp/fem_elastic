@@ -8,9 +8,11 @@ class Triangulator:
     def __init__(self, domain):
         self.vertices = domain.vertices
 
-    def triangulate(self, angle = 30, area = 0.2):
-        triang_string = 'q'+str(angle)+'a'+str(area)
-        return tr.triangulate(dict(vertices = self.vertices), triang_string)
+    def triangulate(self, n, angle = 30, area = 0.2):
+        segments = [[i, i + 1] for i in range(n - 1)]
+        segments.append([n - 1, 0])
+        triang_string = 'pq'+str(angle)+'a'+str(area)
+        return tr.triangulate(dict(vertices = self.vertices, segments=segments), triang_string)
 
 
     def plot(self, triangulation):

@@ -9,8 +9,9 @@ from local import LTriangle
 
 class System:
     elde: ElasticDeform
-    @staticmethod
-    def assemble_matrix(elements, k_e, nn):
+    def __init__(self, elde):
+        self.elde = elde
+    def assemble_matrix(self, elements, k_e, nn):
         # nn - number of nodes
         matrix = [[0 for j in range(2*nn)] for i in range(2*nn)]
         for element in elements:
@@ -26,13 +27,12 @@ class System:
                     matrix[2*ion+1][2*jon+1] += element.jacobian * k_e[2*i+1][2*j+1]
         return matrix
 
-    @staticmethod
-    def assemble_vector(elements, nn, base, b):
-        elde = ElasticDeform(base)
+    def assemble_vector(self, elements, nn, b):
+        # elde = ElasticDeform(base)
         vector = [0 for i in range(2*nn)]
         for element in elements:
             m = len(element.nodes)
-            r_e = elde.load_vector(b, element)
+            r_e = self.elde.load_vector(b, element)
             for i in range(m):
                 ion = element.nodes[i]
                 vector[2*ion] += element.jacobian * r_e[2*i]

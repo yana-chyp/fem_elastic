@@ -34,6 +34,55 @@ class Element:
         else:
             self.calculate_jacobian(local.LSquare)
 
+
+    def find_point_index(self, v, pts, eps=1e-9):
+        for i in range(len(pts)):
+            if abs(pts[i][0] - v[0]) < eps and abs(pts[i][1] - v[1]) < eps:
+                return i
+        return -1
+
+    def add_points(self, vertices):
+        if self.approx==2:
+            for i in range(len(self.vertices)):
+                v = [0.5*(self.vertices[i%3][0] + self.vertices[(i+1)%3][0]),
+                     0.5*(self.vertices[i%3][1] + self.vertices[(i+1)%3][1])]
+                # print(v)
+                index = self.find_point_index(v, vertices, 1e-4)
+                if index>=0:
+                    # print('present')
+                    self.nodes = np.append(self.nodes, [index])
+                else:
+                    # print('new')
+                    # print(len(vertices))
+                    self.vertices.append(v)
+                    vertices = np.append(np.array(vertices), [v], axis=0)
+                    # print(len(vertices))
+                    self.nodes = np.append(self.nodes, [len(vertices)-1])
+        elif self.approx==3:
+            for i in range(len(self.vertices)):
+                v = [2/3 * self.vertices[i % 3][0] + 1/3 * self.vertices[(i + 1) % 3][0],
+                     2/3 * self.vertices[i % 3][1] + 1/3* self.vertices[(i + 1) % 3][1]]
+                index = self.find_point_index(v, vertices, 1e-4)
+                if index >= 0:
+                    self.vertices.append(v)
+                    self.nodes = np.append(self.nodes, [index])
+                else:
+                    self.vertices.append(v)
+                    vertices = np.append(np.array(vertices), [v], axis=0)
+                    self.nodes = np.append(self.nodes, [len(vertices) - 1])
+
+                v = [1 / 3 * self.vertices[i % 3][0] + 2 / 3 * self.vertices[(i + 1) % 3][0],
+                     1 / 3 * self.vertices[i % 3][1] + 2 / 3 * self.vertices[(i + 1) % 3][1]]
+                index = self.find_point_index(v, vertices, 1e-4)
+                if index >= 0:
+                    self.vertices.append(v)
+                    self.nodes = np.append(self.nodes, [index])
+                else:
+                    self.vertices.append(v)
+                    vertices = np.append(np.array(vertices), [v], axis=0)
+                    self.nodes = np.append(self.nodes, [len(vertices) - 1])
+        return vertices
+
     def calculate_jacobian(self, localFigure):
         self.jacobian = localFigure.jacobi(self.vertices)
 

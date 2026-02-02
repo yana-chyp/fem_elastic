@@ -5,7 +5,7 @@ import sympy as sp
 import scipy.integrate as scin
 from sympy.core import numbers
 
-local_triangle = [[0,0], [1,0], [0,1]]
+local_triangle = [[0,0], [1,0], [0,1], [0.5, 0], [0.5, 0.5], [0, 0.5]]
 local_det = 1
 
 ksi = sp.symbols('ksi')
@@ -81,11 +81,13 @@ class LTriangle(Local):
 
     @staticmethod
     def integrate(f):
-        if not callable(f):
-            const_val = float(f) if isinstance(f, numbers.Number) else f
-            f = lambda ksi, eta: const_val
-        # f = f(ksi, eta)
-        return scin.dblquad(lambda ksi, eta: f(ksi, eta), 0, 1, lambda ksi: 0, lambda ksi: 1-ksi)[0]
+        # if not callable(f):
+        #     const_val = float(f) if isinstance(f, numbers.Number) else f
+        #     f = lambda ksi, eta: const_val
+        # f = f(ksi, eta)/
+        # else:
+        f = sp.lambdify((ksi, eta), f)
+        return scin.dblquad(f, 0, 1, lambda ksi: 0, lambda ksi: 1-ksi)[0]
 
 # class LSquare(Local):
 #     # def __init__(self):
