@@ -73,10 +73,10 @@ def apply_bounds_lame(domain, bound_types, elements, vertices, funcs, base, m_e,
     bconds = bc.BoundaryConds()
     bconds.applyNeumann(bounds[1], base, funcs[1], vector)
     bconds.applyNeumann(bounds[3], base, funcs[3], vector)
-    bconds.applyRobin(bounds[0], m_e, base_integrals, alpha, funcs[0], matrix, vector)
-    bconds.applyRobin(bounds[2], m_e, base_integrals, alpha, funcs[2], matrix, vector)
-    # bconds.applyDirichlet(matrix, vector, bounds[0], vertices, lambda x, y: [0, 0])
-    # bconds.applyDirichlet(matrix, vector, bounds[2], vertices, lambda x, y: [0, 0])
+    # bconds.applyRobin(bounds[0], m_e, base_integrals, alpha, funcs[0], matrix, vector)
+    # bconds.applyRobin(bounds[2], m_e, base_integrals, alpha, funcs[2], matrix, vector)
+    bconds.applyDirichlet(matrix, vector, bounds[0], vertices, lambda x, y: [0, 0])
+    bconds.applyDirichlet(matrix, vector, bounds[2], vertices, lambda x, y: [0, 0])
     return matrix, vector, bounds
 
 def apply_bounds_lshape(domain, bound_types, elements, vertices, funcs, base, m_e, base_integrals, matrix, vector, alpha=None):
