@@ -7,8 +7,7 @@ from enum import Enum
 import numpy as np
 import scipy
 import sympy as sp
-
-import domain
+from element import find_edge_idx
 import local
 
 x = sp.symbols('x')
@@ -17,13 +16,70 @@ ksi = sp.symbols('ksi')
 eta = sp.symbols('eta')
 
 class Type(Enum):
-    DIRICHLET = 1
-    NEUMANN = 2
-    ROBIN = 3
+    DIRICHLET = 3
+    NEUMANN = 1
+    ROBIN = 2
+
+class Bound:
+    def __init__(self, type: Type, points):
+        self.type = type
+        self.points = points
+        self.nodes = []
+        self.edges = []
+        self.elems = []
+        # self.degree = degree
+
+    def set_all_nodes(self, nodes):
+        self.nodes = nodes
+
+    def clear(self):
+        self.nodes = []
+        self.edges = []
+        self.elems = []
+
+    def find_elems_and_edges(self, elements):
+        i = 0
+        while i < len(self.nodes)-1:
+            edge = [self.nodes[i], self.nodes[i+1]]
+            elem = [el for el in elements if set(edge) < set(el.nodes)]
+            if len(elem)!=1:
+                print(f'edge: {edge}')
+                print('wrong elem array: len = ', len(elem))
+                for el in elem:
+                    print(f'element: {el.nodes}')
+            assert (len(elem) == 1)
+            # extend edge while next node belongs to the same element
+            while i + len(edge) < len(self.nodes) and self.nodes[i + len(edge)] in elem[0].nodes:
+                edge.append(self.nodes[i + len(edge)])
+            i += len(edge) - 1
+            self.edges.append(np.array(edge))
+            self.elems.append(elem[0])
+            
+        # for edge in self.edges:
+        #     elem = [el for el in elements if set(edge) < set(el.nodes)]
+        #     if len(elem)!=1:
+        #         print('for edge', edge)
+        #         for el in elem:
+        #             print(el.nodes)
+        #     assert (len(elem) == 1)
+        #     if not elem in self.elems:
+        #         self.elems.append(elem[0])
+
+    # def find_edges(self):
+    #     for i in range(0, len(self.nodes)-1, self.degree):
+    #         self.edges.append(self.nodes[i:i+self.degree+1])
+
+def _edge_length_ratio(elem, idx_gamma):
+    ref_lengths = [1.0, 1.4142135623730951, 1.0]
+    v = elem.vertices
+    pairs = [(0,1),(1,2),(2,0)]
+    a, b = pairs[idx_gamma]
+    phys_len = np.sqrt((v[b][0]-v[a][0])**2 + (v[b][1]-v[a][1])**2)
+    return phys_len / ref_lengths[idx_gamma]
 
 class BoundaryConds:
-    def applyDirichlet(self, matrix, vector, nodes, vertices, g):
-        for node in nodes:
+    def applyDirichlet(self, matrix, vector, bound, vertices, g):
+        for node in bound.nodes:
             coords = vertices[node]
             matrix[2*node] = [0 for el in matrix[2*node]]
             matrix[2*node][2*node] = 1
@@ -34,65 +90,46 @@ class BoundaryConds:
             vector[2*node+1] = g(coords[0], coords[1])[1]
         return matrix, vector
 
-    def applyNeumann(self, NT, vector, p, nodes_at_bound, elems_at_bound):
-        # system = local.LTriangle.system(element.vertices)
+    def applyNeumann(self, bound, base, p, vector):
         # NT (ksi, eta) ~> NT (x, y) because we integrate over bound
          # # NT*p = [ 6x2 ] * [ 2 ] = [ 6 ]
         # NTp = np.matvec(NT, p(x, y))
-
-        t = sp.symbols('t')
-        for i in range(len(elems_at_bound)):
-            elem = elems_at_bound[i]
-            # print(elem.nodes)
-            ios = np.where(elem.nodes==nodes_at_bound[i])[0][0]
-            start = local.local_triangle[ios]
-            ioe = np.where(elem.nodes==nodes_at_bound[i+1])[0][0]
-            end = local.local_triangle[ioe]
-
+        # print('Neumann nodes: ', bound.nodes)
+        # print('Neumann edges: ', bound.edges)
+        for i in range(len(bound.elems)):
+            elem = bound.elems[i]
+            edge = bound.edges[i]
+            # print('elem: ', elem.nodes, ', edge: ', edge)
             system = local.LTriangle.system(elem.vertices)
-            # print(system)
-            pksi = sp.sympify(p(x, y)[0])
-            peta = sp.sympify(p(x, y)[1])
-            # print("pksi = ", pksi, ", peta =  ", peta)
-            pksi = pksi.subs('x', system[0]).subs('y', system[1])
-            peta = peta.subs('x', system[0]).subs('y', system[1])
-            # print("pksi = ", pksi, ", peta =  ", peta)
-            NTp = np.matvec(NT, [pksi, peta])
-            # print("NTp = ", NTp)
-
-            ksi_t = start[0] + (end[0]-start[0])*t
-            eta_t = start[1] + (end[1]-start[1])*t
-            NTp = [el.subs('ksi', ksi_t).subs('eta', eta_t) for el in NTp]
-            # print("NTp = ", NTp)
-            integral = [elem.jacobian * scipy.integrate.quad(sp.lambdify(t, el), 0, 1)[0] for el in NTp]
-            ion = nodes_at_bound[i+1]
-            vector[2*ion] += integral[2*ioe]
-            vector[2*ion+1] += integral[2*ioe+1]
+            idx_gamma = find_edge_idx(elem, edge)
+            for node_j in edge:
+                if node_j not in bound.nodes:
+                    continue
+                loc_j = np.where(elem.nodes==node_j)[0][0]
+                integrals = local.LTriangle.integrate_gamma_xy(p, system, base[elem.approx-1][loc_j], idx_gamma)
+                scale = _edge_length_ratio(elem, idx_gamma)
+                vector[2 * node_j] += integrals[0] * scale
+                vector[2 * node_j + 1] += integrals[1] * scale
         return vector
 
-    def applyRobin(self, NT, matrix, vector, m_e, nodes_at_bound, elems_at_bound, alpha, u_0):
-        # Nu + alpha * u = alpha * u_0(x)
-
-        vector = self.applyNeumann(NT, vector,  lambda x, y: [alpha*u_0(x, y)[0], alpha*u_0(x, y)[1]], nodes_at_bound, elems_at_bound)
-
-        t = sp.symbols('t')
-        for i in range(len(elems_at_bound)):
-            elem = elems_at_bound[i]
-            # print(elem.nodes)
-            ios = np.where(elem.nodes == nodes_at_bound[i])[0][0]
-            start = local.local_triangle[ios]
-            ioe = np.where(elem.nodes == nodes_at_bound[i + 1])[0][0]
-            end = local.local_triangle[ioe]
-            ksi_t = start[0] + (end[0] - start[0]) * t
-            eta_t = start[1] + (end[1] - start[1]) * t
-            m_e = [[el.subs('ksi', ksi_t).subs('eta', eta_t) for el in row] for row in m_e]
-            integral = [[scipy.integrate.quad(sp.lambdify(t, el), 0, 1)[0] for el in row] for row in m_e]
-            print(elem.jacobian)
-            ion = nodes_at_bound[i]
-            # jon = nodes_at_bound[i]
-            for j in range(len(elems_at_bound[i].nodes)):
-                jon = elems_at_bound[i].nodes[j]
-                matrix[2 * ion][2 * jon] += alpha * integral[2 * i][2 * j]
-                matrix[2 * ion + 1][2 * jon + 1] += alpha * integral[2 * i + 1][2 * j + 1]
-
+    def applyRobin(self, bound, mass_matrix, base_integrals, alpha, u0, matrix, vector):
+        # print('Robin nodes: ', bound.nodes)
+        # print('Robin edges: ', bound.edges)
+        # print(u0)
+        for i in range(len(bound.elems)):
+            elem = bound.elems[i]
+            edge = bound.edges[i]
+            # print('elem: ', elem, ', edge: ', edge)
+            idx_gamma = find_edge_idx(elem, edge)
+            for node_j in edge:
+                if node_j not in bound.nodes:
+                    continue
+                loc_j = np.where(elem.nodes==node_j)[0][0]
+                scale = _edge_length_ratio(elem, idx_gamma)
+                for node_i in elem.nodes:
+                    loc_i = np.where(elem.nodes==node_i)[0][0]
+                    matrix[2*node_j][2*node_i] += alpha * mass_matrix[elem.approx-1][2*loc_j][2*loc_i][idx_gamma] * scale
+                    matrix[2*node_j+1][2*node_i+1] += alpha * mass_matrix[elem.approx-1][2*loc_j+1][2*loc_i+1][idx_gamma] * scale
+                vector[2*node_j] += alpha * u0(x, y)[0] * base_integrals[elem.approx-1][loc_j][idx_gamma] * scale
+                vector[2*node_j+1] += alpha * u0(x, y)[1] * base_integrals[elem.approx-1][loc_j][idx_gamma] * scale
         return matrix, vector

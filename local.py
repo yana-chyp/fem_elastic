@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
+import math
 
 import numpy as np
+import scipy
 import sympy as sp
 import scipy.integrate as scin
 from sympy.core import numbers
@@ -56,7 +58,7 @@ class LTriangle(Local):
     def jacobi(triangle):
         det = (triangle[1][0] - triangle[0][0]) * (triangle[2][1] - triangle[0][1])
         det -= (triangle[2][0] - triangle[0][0]) * (triangle[1][1] - triangle[0][1])
-        return det
+        return det*2
 
     @staticmethod
     def base(approx_degree=1):
@@ -70,15 +72,40 @@ class LTriangle(Local):
                     4 * ksi * eta,
                     4 * eta * (1 - ksi - eta)]
         elif approx_degree == 3:
-            # todo
-            base = []
+            L1, L2, L3 = 1 - ksi - eta, ksi, eta
+            base = [
+                1/2*L1*(3*L1-1)*(3*L1-2),
+                1/2*L2*(3*L2-1)*(3*L2-2),
+                1/2*L3*(3*L3-1)*(3*L3-2),
+                9/2*L1*L2*(3*L1-1),
+                9/2*L1*L2*(3*L2-1),
+                9/2*L2*L3*(3*L2-1),
+                9/2*L2*L3*(3*L3-1),
+                9/2*L1*L3*(3*L3-1),
+                9/2*L1*L3*(3*L1-1),
+                27*L1*L2*L3,
+            ]
         else:
             raise ('degree not impemented')
         return base
-
-    def matrix(self):
-        return [[]]
-
+    @staticmethod
+    def gradient(vertices, u_values):
+        area = 0.5*abs(LTriangle.jacobi(vertices))
+        x1,y1 = vertices[0]
+        x2,y2 = vertices[1]
+        x3,y3 = vertices[2]
+        J = np.array([[x2-x1, x3-x1], [y2-y1, y3-y1]])
+        invJ = np.linalg.inv(J)
+        if len(u_values) == 3:  # degree 1
+            grad_ref = np.array([[-1,-1], [1, 0], [0, 1]])
+            grad_phys = grad_ref @ invJ.T
+            return sum(u_values[i] * grad_phys[i] for i in range(3))
+        else:
+            degree = {6: 2, 9: 3, 10: 3}[len(u_values)]
+            grad_ref = _grad_ref_at_centroid(degree)
+            grad_phys = grad_ref @ invJ.T
+            return sum(u_values[i] * grad_phys[i] for i in range(len(u_values)))
+    
     @staticmethod
     def integrate(f):
         # if not callable(f):
@@ -88,20 +115,55 @@ class LTriangle(Local):
         # else:
         f = sp.lambdify((ksi, eta), f)
         return scin.dblquad(f, 0, 1, lambda ksi: 0, lambda ksi: 1-ksi)[0]
+    
+    @staticmethod
+    def integrate_gamma(f):
+        return [LTriangle.integrate_gamma_i(f, i) for i in range(3)]
+    @staticmethod
+    def integrate_gamma_i(f, idx):
+        if callable(f):
+            f_symp = sp.sympify((ksi, eta), f)
+        else:
+            f_symp = f
+        t = sp.symbols('t')
+        start, end = local_triangle[idx], local_triangle[(idx+1)%3]
+        ksi_t = start[0] + t * (end[0] - start[0])
+        eta_t = start[1] + t * (end[1] - start[1])
+        jacobi = math.sqrt((end[0] - start[0])**2 + (end[1] - start[1])**2)
+        f_t = f_symp.subs('ksi', ksi_t).subs('eta', eta_t)
+        return scipy.integrate.quad(sp.lambdify(t, f_t), 0, 1)[0] * jacobi
 
-# class LSquare(Local):
-#     # def __init__(self):
-#     def system(self, polyfour):
-#
-#     def jacobi_sys(self, system):
-#
-#     # def jacobi(self, figure):
-#
-#     def base(self, approx_degree=1):
+    @staticmethod
+    def base_integrals(base):
+        base_integrals = []
+        for b in base:
+            base_integrals.append(LTriangle.integrate_gamma(b))
+        return base_integrals
+
+    @staticmethod
+    def integrate_gamma_xy(p, system, phi, gamma_idx):
+        px = sp.sympify(p(x, y)[0])
+        py = sp.sympify(p(x, y)[1])
+        px_ = px.subs('x', system[0]).subs('y', system[1])
+        py_ = py.subs('x', system[0]).subs('y', system[1])
+        return [LTriangle.integrate_gamma_i(px_*phi, gamma_idx),
+                LTriangle.integrate_gamma_i(py_*phi, gamma_idx)] 
 
 
-def f(ksi, eta):
-    return ksi+eta
+
+_grad_cache = {}
+
+def _grad_ref_at_centroid(degree):
+    if degree not in _grad_cache:
+        ksi_c, eta_c = sp.Rational(1,3), sp.Rational(1,3)
+        base = LTriangle.base(degree)
+        _grad_cache[degree] = np.array([
+            [float(sp.diff(b, ksi).subs(ksi, ksi_c).subs(eta, eta_c)),
+             float(sp.diff(b, eta).subs(ksi, ksi_c).subs(eta, eta_c))]
+            for b in base
+        ])
+    return _grad_cache[degree]
+
 
 # ltr = LTriangle()
 # triangle = [[0, 0], [2, 1], [-1, 2]]

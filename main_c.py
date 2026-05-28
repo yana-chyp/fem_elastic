@@ -1,166 +1,180 @@
 import numpy as np
 
-from matplotlib import pyplot as plt
 import domain
+from padapter import PAdapter
+from solver import apply_bounds_lame, assemble_matvec, assemble_matvec_physical, create_elements, init_approx_val_grads, init_exact_val_grads_lame, initialize_base, plot_mesh, plot_solution, refine_mesh, solve
 import triangulation as tr
-import element
-import elasticdeform as elde
-import local
 import system as s
 import domain
 import bound_cond as bc
+from norms import h1_error_elements
 
 
-domain = domain.CircularDomain([[0, 1], [0, 2], [2, 0], [1, 0]], 4)
+
+domain = domain.CircularDomain([[0, 1], [0, 2], [2, 0], [1, 0]], 10)
 # domain = domain.CircularDomain([[0, 0.5], [0, 1], [1, 0], [0.5, 0]])
 
 tr = tr.Triangulator(domain)
 min_angle = 30
-max_area = 0.5
+max_area = 0.025
 mesh = tr.triangulate(len(domain.vertices), min_angle, max_area)
-# mesh = tr.triangulate(dict(vertices = d.vertices, segments=np.array(segments)), "q30a0.05")
 
-import matplotlib.pyplot as plt
-points = mesh['vertices']
-triangles = mesh['triangles']
-# plt.triplot(points[:, 0], points[:, 1], triangles)
-# plt.plot(points[:, 0], points[:, 1], 'o')
-# plt.gca().set_aspect('equal')
-# for i, (x, y) in enumerate(points):
-#     plt.text(x, y, str(i), fontsize=10, color='blue',
-#              ha='center', va='center')
-# plt.show()
+vertices_orig = mesh['vertices']
+triangles_orig = mesh['triangles']
+plot_mesh(vertices_orig, triangles_orig)
 
-vertices = mesh['vertices']
-triangles = mesh['triangles']
+print('vertices: ', len(vertices_orig))
+print('triangles: ', len(triangles_orig))
+# print(triangles)
 
-print(len(vertices))
-print(vertices)
-
-degree = 1
-elements = []
-for triangle in triangles:
-    elements.append(element.Element(3, triangle, vertices, degree))
-for element in elements:
-    vertices = element.add_points(vertices)
-
-
-print(len(vertices))
-print(vertices)
-
-base = local.LTriangle.base(degree)
-print("base = ", base)
-ed = elde.ElasticDeform(base, 25)
-NT = np.transpose(ed.N)
-k_e = ed.stiffness_matrix()
-print("k_e:")
-for row in k_e:
-    print('[' + ', '.join([f"{el:.4f}" for el in row]) + ']' )
-m_e = ed.mass_matrix()
-print("m_e:")
-print(m_e)
-# for row in m_e:
-#     print('[' + ', '.join([f"{el:.4f}" for el in row]) + ']' )
-
+alpha=1000
+young=2500
+ed, base, k_e, m_e, base_integrals = initialize_base(young)
 s = s.System(ed)
-matrix = s.assemble_matrix(elements, k_e, len(vertices))
-# for row in matrix:
-#     print('[' + ', '.join([f"{el:.4f}" for el in row]) + ']' )
-
-# r_e = ed.load_vector(b, p, elements[0])
-# print('load vector r_e: ')
-# print(r_e)
-
 def b(x, y):
     return [0, 0]
-
-vector = s.assemble_vector(elements, len(vertices), b)
-# print('global load vector: ')
-# for el in vector:
-#     print(el)
-
-bounds = domain.get_bounds()
-print(bounds)
-bound_cond_types = [bc.Type.DIRICHLET, bc.Type.NEUMANN, bc.Type.DIRICHLET, bc.Type.NEUMANN]
-bound_nodes = []
-bound_elems = []
-for bound in bounds:
-    print('bound: ', bound)
-    nodes_at_bound = domain.find_nodes_at_bound(bound, vertices)
-    print('nodes at bound: ', nodes_at_bound)
-    bound_nodes.append(nodes_at_bound)
-    bound_elems.append(domain.find_elems_at_bound(nodes_at_bound, elements))
-    print('elems at bound')
-    for el in bound_elems[-1]:
-        print(el.nodes)
-
 def f1(x, y):
     return [0, 0]
-
 def f2(x, y):
     return [0, 0]
 def g1(x, y):
     return [0, 0]
-
 def g2(x, y):
-    # return [0, 0]
     return [x, y]
-
-bconds = bc.BoundaryConds()
-
-# bconds.applyNeumann(NT, vector, g2, bound_nodes[0], bound_elems[0])
-bconds.applyNeumann(NT, vector, g1, bound_nodes[1], bound_elems[1])
-bconds.applyNeumann(NT, vector, g2, bound_nodes[3], bound_elems[3])
-# bconds.applyDirichlet(matrix, vector, bound_nodes[0], vertices, f1)
-# bconds.applyDirichlet(matrix, vector, bound_nodes[2], vertices, f2)
-bconds.applyRobin(NT, matrix, vector, m_e, bound_nodes[0], bound_elems[0], 1, lambda x, y: [0, 0])
-bconds.applyRobin(NT, matrix, vector, m_e, bound_nodes[2], bound_elems[2], 1, lambda x, y: [0, 0])
+bound_types = [bc.Type.ROBIN, bc.Type.NEUMANN, bc.Type.ROBIN, bc.Type.NEUMANN]
 
 
-for row in matrix:
-    print('[' + ', '.join([f"{el:.4f}" for el in row]) + ']' )
-for el in vector:
-    print(el)
+degree = 1
+elements, vertices = create_elements(vertices_orig, triangles_orig, degree)
+print(len(vertices))
+# print(vertices)
+# matrix, vector = assemble_matvec(s, k_e, elements, len(vertices), b)
+matrix, vector = assemble_matvec_physical(s, ed, elements, len(vertices), b)
+matrix, vector, bounds = apply_bounds_lame(domain, bound_types, elements, vertices, [lambda x, y: [0, 0], g1, lambda x, y: [0, 0], g2],
+                            base, m_e, base_integrals, matrix, vector, alpha)
+u = solve(matrix, vector)
+u_exact, u_exact_grad = init_exact_val_grads_lame(ed, elements, vertices)
+u_approx, u_approx_grad = init_approx_val_grads(u, elements)
+errors1 = h1_error_elements(elements, u_exact, u_approx, u_exact_grad, u_approx_grad)
+plot_solution(u, elements, vertices, u_exact)
+print('~~~~~~~h1 norm~~~~')
+print('first degree: ', sum(errors1))
 
-u = np.linalg.solve(matrix, vector)
-print('u = ')
-print('[' + ', '.join([f"{u[i]:.4f}" for i in range(len(u)) if i%2==0]) + ']' )
-print('[' + ', '.join([f"{u[i]:.4f}" for i in range(len(u)) if i%2==1]) + ']' )
+
+mesh_h2 = tr.triangulate(len(domain.vertices), min_angle, max_area/2)
+vertices_h2 = mesh_h2['vertices']
+triangles_h2 = mesh_h2['triangles']
+plot_mesh(vertices_h2, triangles_h2)
+degree = 1
+elements_h2, vertices_h2 = create_elements(vertices_h2, triangles_h2, degree)
+print(len(vertices_h2))
+# print(vertices_h2)
+# matrix, vector = assemble_matvec(s, k_e, elements_h2, len(vertices_h2), b)
+matrix, vector = assemble_matvec_physical(s, ed, elements_h2, len(vertices_h2), b)
+matrix, vector, bounds = apply_bounds_lame(domain, bound_types, elements_h2, vertices_h2, [lambda x, y: [0, 0], g1, lambda x, y: [0, 0], g2],
+                            base, m_e, base_integrals, matrix, vector, alpha)
+u = solve(matrix, vector)
+u_exact, u_exact_grad = init_exact_val_grads_lame(ed, elements_h2, vertices_h2)
+u_approx, u_approx_grad = init_approx_val_grads(u, elements_h2)
+errors_h2 = h1_error_elements(elements_h2, u_exact, u_approx, u_exact_grad, u_approx_grad)
+plot_solution(u, elements_h2, vertices_h2, u_exact)
+print('~~~~~~~h1 norm~~~~')
+print('first degree: ', sum(errors1))
+print('first degree h/2: ', sum(errors_h2))
+
+padapter12 = PAdapter(elements, vertices)
+# error_estimates = padapter.calc_estimates(u_exact, u_approx, u_exact_grad, u_approx_grad)
+vertices, elements = refine_mesh(padapter12, elements, vertices, bounds, domain, errors1, theta=0.5)
+triangles = [list(elem.nodes[0:3]) for elem in elements]
+plot_mesh(vertices, triangles)
+# matrix, vector = assemble_matvec(s, k_e, elements, len(vertices), b)
+matrix, vector = assemble_matvec_physical(s, ed, elements, len(vertices), b)
+matrix, vector, bounds = apply_bounds_lame(domain, bound_types, elements, vertices, [lambda x, y: [0, 0], g1, lambda x, y: [0, 0], g2],
+                            base, m_e, base_integrals, matrix, vector, alpha)
+zero_rows = np.where(~np.array(matrix).any(axis=1))[0]
+# print("Zero rows:", zero_rows)
+u = solve(matrix, vector)
+u_exact, u_exact_grad = init_exact_val_grads_lame(ed, elements, vertices)
+u_approx, u_approx_grad = init_approx_val_grads(u, elements)
+# print(f'lens: u_approx = {len(u_approx)}, u_approx_grad = {len(u_approx_grad)}, u_exact = {len(u_exact)}, u_exact_grad = {len(u_exact_grad)}')
+errors_ph1 = padapter12.calc_estimates(u_exact, u_approx, u_exact_grad, u_approx_grad)
+plot_solution(u, elements, vertices, u_exact)
+
+print('~~~~~~~h1 norm~~~~')
+print('first degree: ', sum(errors1))
+print('first degree h/2: ', sum(errors_h2))
+print('p-adaptive 1-2: ', sum(errors_ph1))
+
+degree = 2
+elements, vertices = create_elements(vertices_orig, triangles_orig, degree)
+print(len(vertices))
+triangles = [list(elem.nodes[0:3]) for elem in elements]
+plot_mesh(vertices, triangles)
+# matrix, vector = assemble_matvec(s, k_e, elements, len(vertices), b)
+matrix, vector = assemble_matvec_physical(s, ed, elements, len(vertices), b)
+matrix, vector, bounds = apply_bounds_lame(domain, bound_types, elements, vertices, [lambda x, y: [0, 0], g1, lambda x, y: [0, 0], g2],
+                            base, m_e, base_integrals, matrix, vector, alpha)
+u = solve(matrix, vector)
+u_exact, u_exact_grad = init_exact_val_grads_lame(ed, elements, vertices)
+u_approx, u_approx_grad = init_approx_val_grads(u, elements)
+errors2 = h1_error_elements(elements, u_exact, u_approx, u_exact_grad, u_approx_grad)
+plot_solution(u, elements, vertices, u_exact)
+
+print('~~~~~~~h1 norm~~~~')
+print('first degree: ', sum(errors1))
+print('first degree h/2: ', sum(errors_h2))
+print('second degree: ', sum(errors2))
+print('p-adaptive 1-2: ', sum(errors_ph1))
+
+
+# padapter23 = PAdapter(elements, vertices)
+# vertices, elements = refine_mesh(padapter23, elements, vertices, errors1, theta=0.5)
+# triangles = [list(elem.nodes[0:3]) for elem in elements]
+# plot_mesh(vertices, triangles)
+# # matrix, vector = assemble_matvec(s, k_e, elements, len(vertices), b)
+# matrix, vector = assemble_matvec_physical(s, ed, elements, len(vertices), b)
+# matrix, vector = apply_bounds_lame(domain, bound_types, elements, vertices, [lambda x, y: [0, 0], g1, lambda x, y: [0, 0], g2],
+#                             base, m_e, base_integrals, matrix, vector, alpha)
+# zero_rows = np.where(~np.array(matrix).any(axis=1))[0]
+# # print("Zero rows:", zero_rows)
+# u = solve(matrix, vector)
+# u_exact, u_exact_grad = init_exact_val_grads_lame(ed, elements, vertices)
+# # u_approx, u_approx_grad = init_approx_val_grads(u, elements)
+# print(f'lens: u_approx = {len(u_approx)}, u_approx_grad = {len(u_approx_grad)}, u_exact = {len(u_exact)}, u_exact_grad = {len(u_exact_grad)}')
+# errors_ph2 = padapter23.calc_estimates(u_exact, u_approx, u_exact_grad, u_approx_grad)
+# plot_solution(u, elements, vertices, u_exact)
+
+
+degree = 3
+elements, vertices = create_elements(vertices_orig, triangles_orig, degree)
+print(len(vertices))
+triangles = [list(elem.nodes[0:3]) for elem in elements]
+plot_mesh(vertices, triangles)
+# matrix, vector = assemble_matvec(s, k_e, elements, len(vertices), b)
+matrix, vector = assemble_matvec_physical(s, ed, elements, len(vertices), b)
+matrix, vector, bounds = apply_bounds_lame(domain, bound_types, elements, vertices, [lambda x, y: [0, 0], g1, lambda x, y: [0, 0], g2],
+                            base, m_e, base_integrals, matrix, vector, alpha)
+u = solve(matrix, vector)
+u_exact, u_exact_grad = init_exact_val_grads_lame(ed, elements, vertices)
+u_approx, u_approx_grad = init_approx_val_grads(u, elements)
+errors3 = h1_error_elements(elements, u_exact, u_approx, u_exact_grad, u_approx_grad)
+plot_solution(u, elements, vertices, u_exact)
+
+print('~~~~~~~h1 norm~~~~')
+print('first degree: ', sum(errors1))
+print('first degree h/2: ', sum(errors_h2))
+print('second degree: ', sum(errors2))
+print('p-adaptive 1-2: ', sum(errors_ph1))
+print('third degree: ', sum(errors3))
+# print('ph-adaptive 2-3: ', sum(errors_ph2))
 
 
 
 
-# scale = 1/440083785668.2612  # deformation scale factor (tune as needed)
-scale = 1
-# Extract displacements
-u_x = u[0::2]
-u_y = u[1::2]
+# notes:
+# support 3rd degree
+# check how gradient for local triangle is calculated, if it supports higher degrees
+# define boundary conditions for L-shaped domain and check
 
-# Compute deformed coordinates
-nodes_def = np.copy(vertices)
-nodes_def[:, 0] += scale * u_x
-nodes_def[:, 1] += scale * u_y
-
-# --- Visualization ---
-plt.figure(figsize=(6, 6))
-
-# Plot undeformed mesh (gray)
-for elem in triangles:
-    elem_nodes = np.append(elem, elem[0])  # close the polygon
-    plt.plot(vertices[elem_nodes, 0], vertices[elem_nodes, 1], 'k--', linewidth=0.5)
-
-# Plot deformed mesh (colored)
-for elem in triangles:
-    elem_nodes = np.append(elem, elem[0])
-    plt.plot(nodes_def[elem_nodes, 0], nodes_def[elem_nodes, 1], 'r-', linewidth=1.5)
-
-for i, (x, y) in enumerate(vertices):
-    plt.text(x, y, str(i), fontsize=10, color='blue',
-             ha='center', va='center')
-
-plt.title("Mesh Deformation Visualization")
-plt.xlabel("x")
-plt.ylabel("y")
-plt.axis('equal')
-plt.legend(["undeformed", "deformed"])
-plt.show()
+# future:
+# use p + mortar (or whatever) instead pf ph
