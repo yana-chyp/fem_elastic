@@ -21,6 +21,10 @@ class ElasticDeform:
         self.D = [[E/(1-nu**2) * element for element in row] for row in [[ 1, nu,        0],
                                                                     [nu,  1,        0],
                                                                     [ 0,  0, (1-nu)/2]]]
+        # plane strain
+        # self.D = [[ E/((1+nu)*(1-2*nu)) * element for element in row] for row in [[1-nu, nu, 0],
+        #                                                                           [nu, 1-nu, 0],
+        #                                                                           [0, 0, (1-2*nu)/2]]]
         L = [[self.d_dksi,         0],
              [        0, self.d_deta],
              [self.d_deta, self.d_dksi]]
@@ -120,10 +124,11 @@ class ElasticDeform:
         theta = math.asin(y/r)
         # if x<0: theta = math.pi - theta
         sin, cos = math.sin(2/3*theta), math.cos(2/3*theta)
-        return [
-            2/3 * r**(-4/3) * (x*sin - y*cos),
-            2/3 * r**(-4/3) * (y*sin + x*cos)
-        ]
+        # return [
+        #     2/3 * r**(-4/3) * (x*sin - y*cos),
+        #     2/3 * r**(-4/3) * (y*sin + x*cos)
+        # ]
+        return [0, 0]
 
     def calculate_stress(self, D, strain):
         # sigma = D * strain = [ 3x3 ] * [ 3 ] = [ 3 ]

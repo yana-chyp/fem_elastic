@@ -22,9 +22,9 @@ def h1_norm(phi, phi_grad):
         norm += np.sum(np.array(phi_grad[i])**2)
     return math.sqrt(norm)
 
-def h1_norm_diff(u_exact, u_approx, u_exact_grad, u_aprrox_grad):
+def h1_norm_diff(u_exact, u_approx, u_exact_grad, u_approx_grad):
     diff = [[u_exact[i][0] - u_approx[i][0], u_exact[i][1] - u_approx[i][1]] for i in range(len(u_exact))]
-    diff_grad = [u_exact_grad[i] - u_aprrox_grad[i] for i in range(len(u_exact_grad))]
+    diff_grad = [u_exact_grad[i] - u_approx_grad[i] for i in range(len(u_exact_grad))]
     return h1_norm(diff, diff_grad)
 
 def mean_exact_grad(exact_grad, vertices):
@@ -35,7 +35,7 @@ def mean_exact_grad(exact_grad, vertices):
 def h1_error_elements(elements, u_exact, u_approx, u_exact_grad, u_approx_grad):
     errors = []
     for i, element in enumerate(elements):
-        corner_nodes = element.nodes[:3]   # only corners, same count for both degrees
+        corner_nodes = element.nodes[:3]
         u_e = u_exact[corner_nodes]
         u_a = u_approx[corner_nodes]
         norm = h1_norm_diff(u_e, u_a, u_exact_grad[i], u_approx_grad[i])

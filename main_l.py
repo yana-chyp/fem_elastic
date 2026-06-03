@@ -34,14 +34,6 @@ ed, base, k_e, m_e, base_integrals = initialize_base(young)
 s = s.System(ed)
 def b(x, y):
     return [0, 0]
-def f1(x, y):
-    return [0, 0]
-def f2(x, y):
-    return [0, 0]
-def g1(x, y):
-    return [0, 0]
-def g2(x, y):
-    return [x, y]
 bound_types = [bc.Type.DIRICHLET, bc.Type.NEUMANN, bc.Type.DIRICHLET, bc.Type.DIRICHLET, bc.Type.NEUMANN, bc.Type.DIRICHLET]
 bound_funcs = [lambda x,y: [0,0], lambda x,y:[0,0], lambda x,y:[1,1], lambda x,y:[1,1], lambda x,y:[0,0], lambda x,y:[0,0]]
 

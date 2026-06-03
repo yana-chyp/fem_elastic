@@ -14,14 +14,18 @@ class PAdapter:
     def __init__(self, elements, vertices):
         self.elements = elements
         self.vertices = vertices
+        self.new_elements = []
+        self.new_vertices = []
         self.perimeter_neigh = []
         self.perimeter_bounds = []
+        self.elems_to_rebuild_idx = []
 
     def calc_estimates(self, u_exact, u_approx, u_exact_grad, u_approx_grad):
         return h1_error_elements(self.elements, u_exact, u_approx, u_exact_grad, u_approx_grad)
 
     def mark_elements(self, error_estimates, theta=0.5):
         elems_to_refine = []
+        self.elems_to_rebuild_idx = []
         # save elements or their numbers
         # maximum strategy
         eta = max(error_estimates)
@@ -29,6 +33,8 @@ class PAdapter:
         for i in range(len(self.elements)):
             if error_estimates[i] >= theta*eta:
                 elems_to_refine.append(self.elements[i])
+            else:
+                self.elems_to_rebuild_idx.append(i)
         return elems_to_refine
 
     def find_by_edge(self, edge, target):
@@ -80,6 +86,7 @@ class PAdapter:
         # print(f'assignment at {idx}: {self.elements[idx].nodes} <- {refined.nodes}')
         self.elements[idx] = refined
         # print(f'refined element: ', self.elements[idx].nodes)
+        self.new_elements.append(refined)
         neighbours = []
         for i in range(3):
             edge = [element.nodes[i], refined.nodes[i+3], element.nodes[(i+1)%3]]
@@ -136,10 +143,10 @@ class PAdapter:
                 chain.append(candidates[0])
                 visited.add(candidates[0])
             clusters.append(chain)
+            print('chain found: ', chain)
         return clusters
 
     def mesh_cluster(self, cluster, degree, min_angle=30, max_area=0.1):
-        # collect ordered unique perimeter nodes (corners only, no midpoints)
         perim_nodes = []
         for edge in cluster:
             if int(edge[0]) not in perim_nodes:
@@ -148,14 +155,20 @@ class PAdapter:
                 perim_nodes.append(int(edge[1]))
         coords = np.array([self.vertices[n] for n in perim_nodes], dtype=float)
         n = len(perim_nodes)
+        print('perim nodes: ', perim_nodes)
         # for i in range(n):
             # print(f'node: {perim_nodes[i]} is {coords[i]}')
+        print('elems to rebuild indices: ', self.elems_to_rebuild_idx)
+        # for idx in self.elems_to_rebuild_idx:
+            # print('elem to rebuild: ', self.elements[idx].nodes)
+            # self.elements.pop(idx)
+        
         domain = dom.Domain(coords)
         tr = triangulation.Triangulator(domain)
         mesh = tr.triangulate(len(perim_nodes), min_angle, max_area)
         new_verts = mesh['vertices']
         new_tris  = mesh['triangles']
-        plot_mesh(new_verts, new_tris)
+        plot_mesh(new_verts, new_tris)  
 
 
         # first n local indices map exactly to perim_nodes
@@ -175,10 +188,10 @@ class PAdapter:
         new_elements = []
         for tri in new_tris:
             global_nodes = np.array([local_to_global[i] for i in tri])
-            new_elem = el.Element(3, global_nodes, self.vertices, degree)
+            new_elem = el.Element(3, global_nodes, self.vertices, degree-1)
             self.vertices = new_elem.add_points(self.vertices)
-            new_elements.append(new_elem)
-        self.elements = np.append(self.elements, new_elements)
+            self.new_elements.append(new_elem)
+        # self.elements = np.append(self.elements, new_elements)
 
     def refinement(self, marked_elements, bounds, domain, degree=2, min_angle=30):
         for element in marked_elements:
@@ -190,5 +203,4 @@ class PAdapter:
             self.mesh_cluster(cluster, degree, min_angle)
         self.perimeter_neigh = []
         self.perimeter_bounds = []
-        print(f'len after refinement vertices: {len(self.vertices)}, elements: {len(self.elements)}')
 

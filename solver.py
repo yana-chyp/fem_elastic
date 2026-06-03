@@ -13,9 +13,9 @@ def plot_mesh(points, triangles):
     plt.triplot(points[:, 0], points[:, 1], triangles)
     plt.plot(points[:, 0], points[:, 1], 'o')
     plt.gca().set_aspect('equal')
-    for i, (x, y) in enumerate(points):
-        plt.text(x, y, str(i), fontsize=10, color='blue',
-                ha='center', va='center')
+    # for i, (x, y) in enumerate(points):
+        # plt.text(x, y, str(i), fontsize=10, color='blue',
+                # ha='center', va='center')
     plt.show()
 
 def create_elements(vertices, triangles, degree):
@@ -53,16 +53,30 @@ def assemble_matvec_physical(s, ed, elements, nn, b):
     vector = s.assemble_vector(elements, nn, b)
     return matrix, vector
 
+def apply_bounds_rectangle(domain, bound_types, elements, vertices, funcs, base, m_e, base_integrals, matrix, vector, alpha=None):
+    bounds_coords = domain.get_bounds()
+    bounds = []
+    for i in range(len(bounds_coords)):
+        bound = bc.Bound(type=bound_types[i], points=bounds_coords[i])
+        bound.set_all_nodes(domain.find_nodes_at_bound(bounds_coords[i], vertices))
+        # print('bound: ', bound.points)
+        # print('nodes at bound: ', bound.nodes)
+        bound.find_elems_and_edges(elements)
+        bounds.append(bound)
+    bounds = domain.apply_priority(bounds)
+    bconds = bc.BoundaryConds()
+    bconds.applyNeumann(bounds[1], base, funcs[1], vector)
+    bconds.applyNeumann(bounds[3], base, funcs[3], vector)
+    # bconds.applyRobin(bounds[0], m_e, base_integrals, alpha, funcs[0], matrix, vector)
+    # bconds.applyRobin(bounds[2], m_e, base_integrals, alpha, funcs[2], matrix, vector)
+    bconds.applyDirichlet(matrix, vector, bounds[0], vertices, lambda x, y: [0, 0])
+    bconds.applyDirichlet(matrix, vector, bounds[2], vertices, lambda x, y: [0, 0])
+    return matrix, vector, bounds
+
 def apply_bounds_lame(domain, bound_types, elements, vertices, funcs, base, m_e, base_integrals, matrix, vector, alpha=None):
     bounds_coords = domain.get_bounds()
     bounds = []
     for i in range(len(bounds_coords)):
-        if i==0 or i==2:
-            type = 'lin'
-        elif i==1:
-            type = 'cir1'
-        else:
-            type = 'cir2'
         bound = bc.Bound(type=bound_types[i], points=bounds_coords[i])
         bound.set_all_nodes(domain.find_nodes_at_bound(bounds_coords[i], vertices))
         # print('bound: ', bound.points)
@@ -83,12 +97,6 @@ def apply_bounds_lshape(domain, bound_types, elements, vertices, funcs, base, m_
     bounds_coords = domain.get_bounds()
     bounds = []
     for i in range(len(bounds_coords)):
-        if i==0 or i==2:
-            type = 'lin'
-        elif i==1:
-            type = 'cir1'
-        else:
-            type = 'cir2'
         bound = bc.Bound(type=bound_types[i], points=bounds_coords[i])
         bound.set_all_nodes(domain.find_nodes_at_bound(bounds_coords[i], vertices))
         bound.find_elems_and_edges(elements)
@@ -131,12 +139,16 @@ def init_approx_val_grads(u, elements):
 
 def init_exact_val_grads_lshape(ed, elements, vertices):
     u_exact = np.array([
-        [val := ed.u_lshape(vertices[node, 0], vertices[node, 1]), val]
+        # [val := ed.u_lshape(vertices[node, 0], vertices[node, 1]), val]
+        [0, 0]
         for node in range(len(vertices))])
     u_exact_grad = np.array([mean_exact_grad(ed.u_lshape_grad, vertices[element.nodes]) for element in elements])
     return u_exact, u_exact_grad
 
-
+def init_exact_val_grads_rectangle(ed, elements, vertices):
+    u_exact = np.array([[0, 0] for v in vertices])
+    u_grad = np.array([[0, 0] for el in elements])
+    return u_exact, u_grad
 
 def plot_solution(u, elements, vertices, u_exact=None):
     scale = 1
@@ -182,6 +194,25 @@ def refine_mesh(padapter, elements, vertices, bounds, domain, error_estimates, t
     marked_elems = padapter.mark_elements(error_estimates, theta)
     print(f'len before vertices: {len(vertices)}, elements: {len(elements)}')
     padapter.refinement(marked_elems, bounds, domain)
-    vertices, elements = padapter.vertices, padapter.elements
+    vertices, elements = padapter.vertices, padapter.new_elements
     print(f'len after vertices: {len(vertices)}, elements: {len(elements)}')
+    return vertices, elements
+
+def clean_vertices(vertices, elements):
+    all_nodes = set(node for element in elements for node in element.nodes)
+    # print('all_nodes: ', all_nodes)
+    vertices_nodes = set(i for i in range(len(vertices)))
+    nodes_to_exclude = vertices_nodes - all_nodes
+    print('nodes_to_exclude: ', nodes_to_exclude)
+    n = len(vertices)
+    for node in nodes_to_exclude:
+        vertices[node] = vertices[n-1]
+        vertices = np.delete(vertices, n - 1, axis=0)
+        for el in elements:
+            for j in range(len(el.nodes)):
+                if el.nodes[j] == n-1:
+                    el.nodes[j] = node
+        n-=1
+    # all_nodes = set(node for element in elements for node in element.nodes)
+    # print('all_nodes: ', all_nodes)
     return vertices, elements
